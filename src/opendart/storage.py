@@ -58,6 +58,12 @@ class Database:
                     sections_count INTEGER NOT NULL DEFAULT 0,
                     chunks_count INTEGER NOT NULL DEFAULT 0,
                     financial_facts_count INTEGER NOT NULL DEFAULT 0,
+                    core_sections_count INTEGER NOT NULL DEFAULT 0,
+                    conditional_sections_count INTEGER NOT NULL DEFAULT 0,
+                    archive_sections_count INTEGER NOT NULL DEFAULT 0,
+                    core_chunks_count INTEGER NOT NULL DEFAULT 0,
+                    conditional_chunks_count INTEGER NOT NULL DEFAULT 0,
+                    archive_chunks_count INTEGER NOT NULL DEFAULT 0,
                     qa_status TEXT,
                     synced_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
@@ -77,6 +83,7 @@ class Database:
                     ordinal INTEGER NOT NULL,
                     source_tag TEXT NOT NULL,
                     section_type TEXT,
+                    section_priority TEXT,
                     is_cover INTEGER NOT NULL DEFAULT 0,
                     is_noise INTEGER NOT NULL DEFAULT 0
                 );
@@ -131,6 +138,7 @@ class Database:
                     heading TEXT NOT NULL,
                     source_tag TEXT NOT NULL,
                     section_type TEXT NOT NULL,
+                    section_priority TEXT,
                     text TEXT NOT NULL,
                     retrieval_text TEXT NOT NULL,
                     body_char_start INTEGER NOT NULL,
@@ -138,6 +146,7 @@ class Database:
                     char_count INTEGER NOT NULL,
                     token_estimate INTEGER NOT NULL,
                     is_retrieval_candidate INTEGER NOT NULL DEFAULT 1,
+                    is_conditional_candidate INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -178,6 +187,9 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_sections_heading_path
                 ON sections(rcept_no, heading_path);
 
+                CREATE INDEX IF NOT EXISTS idx_sections_priority
+                ON sections(rcept_no, section_priority);
+
                 CREATE INDEX IF NOT EXISTS idx_financial_facts_lookup
                 ON financial_facts(stock_code, bsns_year, fs_div, account_nm);
 
@@ -189,6 +201,12 @@ class Database:
 
                 CREATE INDEX IF NOT EXISTS idx_section_chunks_retrieval
                 ON section_chunks(rcept_no, is_retrieval_candidate);
+
+                CREATE INDEX IF NOT EXISTS idx_section_chunks_conditional
+                ON section_chunks(rcept_no, is_conditional_candidate);
+
+                CREATE INDEX IF NOT EXISTS idx_section_chunks_priority
+                ON section_chunks(rcept_no, section_priority);
 
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_qa_checks_unique
                 ON qa_checks(rcept_no, check_name);
@@ -209,6 +227,16 @@ class Database:
         self._ensure_column("filings", "sections_count", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("filings", "chunks_count", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("filings", "financial_facts_count", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("filings", "core_sections_count", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column(
+            "filings", "conditional_sections_count", "INTEGER NOT NULL DEFAULT 0"
+        )
+        self._ensure_column("filings", "archive_sections_count", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("filings", "core_chunks_count", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column(
+            "filings", "conditional_chunks_count", "INTEGER NOT NULL DEFAULT 0"
+        )
+        self._ensure_column("filings", "archive_chunks_count", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("filings", "qa_status", "TEXT")
 
         self._ensure_column("sections", "section_key", "TEXT")
@@ -218,9 +246,14 @@ class Database:
         self._ensure_column("sections", "body_line_count", "INTEGER")
         self._ensure_column("sections", "body_hash", "TEXT")
         self._ensure_column("sections", "section_type", "TEXT")
+        self._ensure_column("sections", "section_priority", "TEXT")
         self._ensure_column("sections", "is_cover", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("sections", "is_noise", "INTEGER NOT NULL DEFAULT 0")
 
+        self._ensure_column("section_chunks", "section_priority", "TEXT")
+        self._ensure_column(
+            "section_chunks", "is_conditional_candidate", "INTEGER NOT NULL DEFAULT 0"
+        )
         self._ensure_column("financial_facts", "fact_key", "TEXT")
         self._ensure_column("financial_facts", "thstrm_amount_value", "INTEGER")
         self._ensure_column("financial_facts", "frmtrm_amount_value", "INTEGER")
@@ -274,14 +307,19 @@ class Database:
                     report_nm, report_kind, reprt_code, rcept_dt, flr_nm, is_final,
                     storage_key, raw_document_path, raw_xbrl_path, silver_base_path,
                     gold_base_path, manifest_path, sections_count, chunks_count,
-                    financial_facts_count, qa_status
+                    financial_facts_count, core_sections_count, conditional_sections_count,
+                    archive_sections_count, core_chunks_count, conditional_chunks_count,
+                    archive_chunks_count, qa_status
                 )
                 VALUES (
                     :rcept_no, :corp_code, :stock_code, :corp_name, :business_year,
                     :fiscal_month, :report_nm, :report_kind, :reprt_code, :rcept_dt, :flr_nm,
                     :is_final, :storage_key, :raw_document_path, :raw_xbrl_path,
                     :silver_base_path, :gold_base_path, :manifest_path, :sections_count,
-                    :chunks_count, :financial_facts_count, :qa_status
+                    :chunks_count, :financial_facts_count, :core_sections_count,
+                    :conditional_sections_count, :archive_sections_count,
+                    :core_chunks_count, :conditional_chunks_count, :archive_chunks_count,
+                    :qa_status
                 )
                 ON CONFLICT(rcept_no) DO UPDATE SET
                     corp_code=excluded.corp_code,
@@ -304,6 +342,12 @@ class Database:
                     sections_count=excluded.sections_count,
                     chunks_count=excluded.chunks_count,
                     financial_facts_count=excluded.financial_facts_count,
+                    core_sections_count=excluded.core_sections_count,
+                    conditional_sections_count=excluded.conditional_sections_count,
+                    archive_sections_count=excluded.archive_sections_count,
+                    core_chunks_count=excluded.core_chunks_count,
+                    conditional_chunks_count=excluded.conditional_chunks_count,
+                    archive_chunks_count=excluded.archive_chunks_count,
                     qa_status=excluded.qa_status,
                     synced_at=CURRENT_TIMESTAMP
                 """,
@@ -311,6 +355,29 @@ class Database:
             )
 
     def replace_sections(self, rcept_no: str, sections: list[Section]) -> None:
+        section_rows = []
+        for section in sections:
+            profile = profile_section(section)
+            section_rows.append(
+                (
+                    rcept_no,
+                    profile.section_key,
+                    section.heading_path,
+                    profile.parent_heading_path,
+                    section.heading,
+                    profile.heading_level,
+                    section.body,
+                    profile.body_char_count,
+                    profile.body_line_count,
+                    profile.body_hash,
+                    section.ordinal,
+                    section.source_tag,
+                    profile.section_type,
+                    profile.section_priority,
+                    int(profile.is_cover),
+                    int(profile.is_noise),
+                )
+            )
         with self.connection:
             self.connection.execute("DELETE FROM sections WHERE rcept_no = ?", (rcept_no,))
             self.connection.executemany(
@@ -318,30 +385,11 @@ class Database:
                 INSERT INTO sections (
                     rcept_no, section_key, heading_path, parent_heading_path, heading,
                     heading_level, body, body_char_count, body_line_count, body_hash,
-                    ordinal, source_tag, section_type, is_cover, is_noise
+                    ordinal, source_tag, section_type, section_priority, is_cover, is_noise
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                [
-                    (
-                        rcept_no,
-                        profile_section(section).section_key,
-                        section.heading_path,
-                        profile_section(section).parent_heading_path,
-                        section.heading,
-                        profile_section(section).heading_level,
-                        section.body,
-                        profile_section(section).body_char_count,
-                        profile_section(section).body_line_count,
-                        profile_section(section).body_hash,
-                        section.ordinal,
-                        section.source_tag,
-                        profile_section(section).section_type,
-                        int(profile_section(section).is_cover),
-                        int(profile_section(section).is_noise),
-                    )
-                    for section in sections
-                ],
+                section_rows,
             )
 
     def replace_financial_facts(
@@ -438,11 +486,11 @@ class Database:
                 """
                 INSERT INTO section_chunks (
                     rcept_no, section_key, section_ordinal, chunk_ordinal, chunk_key,
-                    heading_path, heading, source_tag, section_type, text, retrieval_text,
-                    body_char_start, body_char_end, char_count, token_estimate,
-                    is_retrieval_candidate
+                    heading_path, heading, source_tag, section_type, section_priority,
+                    text, retrieval_text, body_char_start, body_char_end, char_count,
+                    token_estimate, is_retrieval_candidate, is_conditional_candidate
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -455,6 +503,7 @@ class Database:
                         chunk.heading,
                         chunk.source_tag,
                         chunk.section_type,
+                        chunk.section_priority,
                         chunk.text,
                         chunk.retrieval_text,
                         chunk.body_char_start,
@@ -462,6 +511,7 @@ class Database:
                         chunk.char_count,
                         chunk.token_estimate,
                         int(chunk.is_retrieval_candidate),
+                        int(chunk.is_conditional_candidate),
                     )
                     for chunk in chunks
                 ],

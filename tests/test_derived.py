@@ -11,7 +11,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from opendart.derived import (  # noqa: E402
     build_qa_checks,
     build_section_chunks,
+    filter_chunks_by_priority,
+    infer_section_priority,
+    PRIORITY_ARCHIVE,
+    PRIORITY_CONDITIONAL,
+    PRIORITY_CORE,
     profile_section,
+    summarize_chunk_priority_counts,
+    summarize_section_priority_counts,
     summarize_qa_status,
     write_chunks_jsonl,
 )
@@ -32,6 +39,7 @@ class DerivedTests(unittest.TestCase):
 
         self.assertTrue(profile.is_cover)
         self.assertEqual(profile.section_type, "cover")
+        self.assertEqual(profile.section_priority, PRIORITY_ARCHIVE)
         self.assertEqual(profile.body_line_count, 2)
         self.assertEqual(profile.section_key, "section-0001")
 
@@ -50,6 +58,8 @@ class DerivedTests(unittest.TestCase):
         self.assertGreater(len(chunks), 1)
         self.assertTrue(all(chunk.retrieval_text.startswith(section.heading_path) for chunk in chunks))
         self.assertTrue(all(chunk.chunk_key.startswith("section-0003-chunk-") for chunk in chunks))
+        self.assertTrue(all(chunk.section_priority == PRIORITY_CORE for chunk in chunks))
+        self.assertTrue(all(chunk.is_retrieval_candidate for chunk in chunks))
 
     def test_build_qa_checks_reports_core_metrics_and_status(self) -> None:
         sections = [
@@ -81,6 +91,87 @@ class DerivedTests(unittest.TestCase):
         status_by_name = {check.check_name: check.status for check in checks}
         self.assertEqual(status_by_name["core_metric_coverage"], "pass")
         self.assertEqual(summarize_qa_status(checks), "fail")
+
+    def test_infer_section_priority_splits_core_conditional_archive(self) -> None:
+        core_section = Section(
+            heading_path="II. 사업의 내용 > 1. 사업의 개요",
+            heading="1. 사업의 개요",
+            body="사업 설명",
+            ordinal=1,
+            source_tag="TITLE",
+        )
+        conditional_section = Section(
+            heading_path="VII. 주주에 관한 사항 > 1. 최대주주 및 그 특수관계인의 주식소유 현황",
+            heading="1. 최대주주 및 그 특수관계인의 주식소유 현황",
+            body="주주 설명",
+            ordinal=2,
+            source_tag="TITLE",
+        )
+        archive_section = Section(
+            heading_path="XII. 상세표 > 1. 연결대상 종속회사 현황(상세)",
+            heading="1. 연결대상 종속회사 현황(상세)",
+            body="상세 표",
+            ordinal=3,
+            source_tag="TITLE",
+        )
+
+        self.assertEqual(infer_section_priority(core_section), PRIORITY_CORE)
+        self.assertEqual(infer_section_priority(conditional_section), PRIORITY_CONDITIONAL)
+        self.assertEqual(infer_section_priority(archive_section), PRIORITY_ARCHIVE)
+
+    def test_chunk_priority_helpers_split_delivery_pools(self) -> None:
+        sections = [
+            Section(
+                heading_path="II. 사업의 내용 > 1. 사업의 개요",
+                heading="1. 사업의 개요",
+                body="A" * 200,
+                ordinal=1,
+                source_tag="TITLE",
+            ),
+            Section(
+                heading_path="V. 회계감사인의 감사의견 등 > 감사의견",
+                heading="감사의견",
+                body="B" * 200,
+                ordinal=2,
+                source_tag="TITLE",
+            ),
+            Section(
+                heading_path="XII. 상세표 > 1. 연결대상 종속회사 현황(상세)",
+                heading="1. 연결대상 종속회사 현황(상세)",
+                body="C" * 200,
+                ordinal=3,
+                source_tag="TITLE",
+            ),
+        ]
+
+        chunks = build_section_chunks(sections, target_chars=120, max_chars=160, min_chars=80)
+        counts = summarize_chunk_priority_counts(chunks)
+        section_counts = summarize_section_priority_counts(sections)
+
+        self.assertGreater(counts[PRIORITY_CORE], 0)
+        self.assertGreater(counts[PRIORITY_CONDITIONAL], 0)
+        self.assertGreater(counts[PRIORITY_ARCHIVE], 0)
+        self.assertEqual(section_counts[PRIORITY_CORE], 1)
+        self.assertEqual(section_counts[PRIORITY_CONDITIONAL], 1)
+        self.assertEqual(section_counts[PRIORITY_ARCHIVE], 1)
+        self.assertTrue(
+            any(
+                chunk.is_retrieval_candidate
+                for chunk in filter_chunks_by_priority(chunks, PRIORITY_CORE)
+            )
+        )
+        self.assertTrue(
+            any(
+                chunk.is_conditional_candidate
+                for chunk in filter_chunks_by_priority(chunks, PRIORITY_CONDITIONAL)
+            )
+        )
+        self.assertTrue(
+            all(
+                (not chunk.is_retrieval_candidate and not chunk.is_conditional_candidate)
+                for chunk in filter_chunks_by_priority(chunks, PRIORITY_ARCHIVE)
+            )
+        )
 
     def test_write_chunks_jsonl_creates_line_delimited_output(self) -> None:
         section = Section(

@@ -11,7 +11,12 @@ from .client import OpenDartClient, OpenDartNoDataError
 from .derived import (
     build_qa_checks,
     build_section_chunks,
+    PRIORITY_ARCHIVE,
+    PRIORITY_CONDITIONAL,
+    PRIORITY_CORE,
+    summarize_chunk_priority_counts,
     summarize_qa_status,
+    summarize_section_priority_counts,
     write_chunks_jsonl,
     write_qa_checks_json,
 )
@@ -42,9 +47,13 @@ class SyncResult:
     sections_path: Path
     financial_facts_path: Path
     chunks_path: Path
+    core_chunks_path: Path
+    conditional_chunks_path: Path
     qa_checks_path: Path
     sections_count: int
     chunks_count: int
+    core_chunks_count: int
+    conditional_chunks_count: int
     financial_facts_count: int
     qa_status: str
 
@@ -215,17 +224,31 @@ def sync_annual_report(
                 "sections_count": 0,
                 "chunks_count": 0,
                 "financial_facts_count": 0,
+                "core_sections_count": 0,
+                "conditional_sections_count": 0,
+                "archive_sections_count": 0,
+                "core_chunks_count": 0,
+                "conditional_chunks_count": 0,
+                "archive_chunks_count": 0,
                 "qa_status": None,
             }
         )
 
         sections = parse_sections_from_document_zip(document_zip)
+        section_priority_counts = summarize_section_priority_counts(sections)
         sections_path = silver_base_dir / "sections.json"
         write_sections_json(sections_path, sections)
         database.replace_sections(rcept_no, sections)
         chunks = build_section_chunks(sections)
+        chunk_priority_counts = summarize_chunk_priority_counts(chunks)
+        core_chunks = [chunk for chunk in chunks if chunk.is_retrieval_candidate]
+        conditional_chunks = [chunk for chunk in chunks if chunk.is_conditional_candidate]
         chunks_path = gold_base_dir / "chunks.jsonl"
+        core_chunks_path = gold_base_dir / "core_chunks.jsonl"
+        conditional_chunks_path = gold_base_dir / "conditional_chunks.jsonl"
         write_chunks_jsonl(chunks_path, chunks)
+        write_chunks_jsonl(core_chunks_path, core_chunks)
+        write_chunks_jsonl(conditional_chunks_path, conditional_chunks)
         database.replace_section_chunks(rcept_no, chunks)
 
         all_facts: list[dict[str, Any]] = []
@@ -275,12 +298,26 @@ def sync_annual_report(
                 "sections_path": str(sections_path),
                 "financial_facts_path": str(financial_facts_path),
                 "chunks_path": str(chunks_path),
+                "core_chunks_path": str(core_chunks_path),
+                "conditional_chunks_path": str(conditional_chunks_path),
                 "qa_checks_path": str(qa_checks_path),
                 "sections_count": len(sections),
                 "chunks_count": len(chunks),
+                "core_sections_count": section_priority_counts[PRIORITY_CORE],
+                "conditional_sections_count": section_priority_counts[PRIORITY_CONDITIONAL],
+                "archive_sections_count": section_priority_counts[PRIORITY_ARCHIVE],
+                "core_chunks_count": chunk_priority_counts[PRIORITY_CORE],
+                "conditional_chunks_count": chunk_priority_counts[PRIORITY_CONDITIONAL],
+                "archive_chunks_count": chunk_priority_counts[PRIORITY_ARCHIVE],
+                "core_retrieval_chunks_count": len(core_chunks),
+                "conditional_retrieval_chunks_count": len(conditional_chunks),
                 "financial_facts_count": len(all_facts),
                 "qa_status": qa_status,
                 "qa_check_count": len(qa_checks),
+                "default_retrieval_strategy": (
+                    "Use core_chunks.jsonl by default and open "
+                    "conditional_chunks.jsonl only for governance/audit/shareholder questions."
+                ),
             },
         )
         database.upsert_filing(
@@ -306,6 +343,12 @@ def sync_annual_report(
                 "sections_count": len(sections),
                 "chunks_count": len(chunks),
                 "financial_facts_count": len(all_facts),
+                "core_sections_count": section_priority_counts[PRIORITY_CORE],
+                "conditional_sections_count": section_priority_counts[PRIORITY_CONDITIONAL],
+                "archive_sections_count": section_priority_counts[PRIORITY_ARCHIVE],
+                "core_chunks_count": chunk_priority_counts[PRIORITY_CORE],
+                "conditional_chunks_count": chunk_priority_counts[PRIORITY_CONDITIONAL],
+                "archive_chunks_count": chunk_priority_counts[PRIORITY_ARCHIVE],
                 "qa_status": qa_status,
             }
         )
@@ -348,6 +391,20 @@ def sync_annual_report(
             _file_artifact(
                 rcept_no=rcept_no,
                 layer="gold",
+                artifact_role="core_chunks_jsonl",
+                artifact_format="jsonl",
+                path=core_chunks_path,
+            ),
+            _file_artifact(
+                rcept_no=rcept_no,
+                layer="gold",
+                artifact_role="conditional_chunks_jsonl",
+                artifact_format="jsonl",
+                path=conditional_chunks_path,
+            ),
+            _file_artifact(
+                rcept_no=rcept_no,
+                layer="gold",
                 artifact_role="qa_checks_json",
                 artifact_format="json",
                 path=qa_checks_path,
@@ -373,6 +430,7 @@ def sync_annual_report(
             report_nm=str(filing["report_nm"]),
             message=(
                 f"sections={len(sections)}, chunks={len(chunks)}, "
+                f"core_chunks={len(core_chunks)}, conditional_chunks={len(conditional_chunks)}, "
                 f"financial_facts={len(all_facts)}, qa_status={qa_status}"
             ),
         )
@@ -389,9 +447,13 @@ def sync_annual_report(
             sections_path=sections_path,
             financial_facts_path=financial_facts_path,
             chunks_path=chunks_path,
+            core_chunks_path=core_chunks_path,
+            conditional_chunks_path=conditional_chunks_path,
             qa_checks_path=qa_checks_path,
             sections_count=len(sections),
             chunks_count=len(chunks),
+            core_chunks_count=len(core_chunks),
+            conditional_chunks_count=len(conditional_chunks),
             financial_facts_count=len(all_facts),
             qa_status=qa_status,
         )

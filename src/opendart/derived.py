@@ -12,11 +12,50 @@ from .parsers import Section
 
 IMAGE_FILE_RE = re.compile(r"\b[\w./-]+\.(?:jpg|jpeg|png|gif|bmp|svg)\b", re.IGNORECASE)
 WHITESPACE_RE = re.compile(r"\s+")
+NUMERIC_TOP_LEVEL_RE = re.compile(r"^\d+-\d+\.")
 CORE_FACT_ALIASES = {
     "assets_total": {"자산총계"},
     "revenue": {"매출액", "영업수익", "수익(매출액)", "매출및지분법손익"},
     "operating_income": {"영업이익"},
     "net_income": {"당기순이익", "당기순이익(손실)", "당기순이익귀속지배기업주주지분"},
+}
+PRIORITY_CORE = "core"
+PRIORITY_CONDITIONAL = "conditional"
+PRIORITY_ARCHIVE = "archive"
+TOP_LEVEL_CORE_PREFIXES = {
+    "I. 회사의 개요",
+    "II. 사업의 내용",
+    "III. 재무에 관한 사항",
+    "IV. 이사의 경영진단 및 분석의견",
+    "XI. 그 밖에 투자자 보호를 위하여 필요한 사항",
+}
+TOP_LEVEL_CONDITIONAL_PREFIXES = {
+    "V. 회계감사인의 감사의견 등",
+    "VII. 주주에 관한 사항",
+    "X. 대주주 등과의 거래내용",
+}
+ARCHIVE_TOP_LEVEL_PREFIXES = {
+    "document",
+    "【 대표이사 등의 확인 】",
+    "XII. 상세표",
+}
+CONDITIONAL_VI_NEEDLES = {
+    "가. 이사회 구성 개요",
+    "위원회의 설치현황",
+    "지배구조",
+}
+CONDITIONAL_VIII_NEEDLES = {
+    "바. 직원 등의 현황",
+    "(육아지원제도)",
+    "(유연근무제도)",
+    "복리후생",
+    "안전보건",
+    "교육훈련",
+}
+CONDITIONAL_IX_NEEDLES = {
+    "(요약)",
+    "관련법령상의 규제내용 등",
+    "타법인 출자 현황(요약)",
 }
 
 
@@ -29,6 +68,7 @@ class SectionProfile:
     body_line_count: int
     body_hash: str
     section_type: str
+    section_priority: str
     is_cover: bool
     is_noise: bool
 
@@ -46,6 +86,7 @@ class SectionChunk:
     heading: str
     source_tag: str
     section_type: str
+    section_priority: str
     text: str
     retrieval_text: str
     body_char_start: int
@@ -53,6 +94,7 @@ class SectionChunk:
     char_count: int
     token_estimate: int
     is_retrieval_candidate: bool
+    is_conditional_candidate: bool
 
     def to_dict(self) -> dict[str, str | int | bool]:
         return asdict(self)
@@ -88,6 +130,40 @@ def infer_section_type(section: Section) -> str:
     return "body"
 
 
+def infer_section_priority(section: Section) -> str:
+    heading_path = section.heading_path
+    top_level = heading_path.split(" > ")[0]
+
+    if top_level in ARCHIVE_TOP_LEVEL_PREFIXES:
+        return PRIORITY_ARCHIVE
+    if top_level in TOP_LEVEL_CORE_PREFIXES:
+        return PRIORITY_CORE
+    if top_level in TOP_LEVEL_CONDITIONAL_PREFIXES:
+        return PRIORITY_CONDITIONAL
+
+    if top_level.startswith("VI. "):
+        if any(needle in heading_path for needle in CONDITIONAL_VI_NEEDLES):
+            return PRIORITY_CONDITIONAL
+        return PRIORITY_ARCHIVE
+
+    if top_level.startswith("VIII. "):
+        if any(needle in heading_path for needle in CONDITIONAL_VIII_NEEDLES):
+            return PRIORITY_CONDITIONAL
+        return PRIORITY_ARCHIVE
+
+    if top_level.startswith("IX. "):
+        if any(needle in heading_path for needle in CONDITIONAL_IX_NEEDLES):
+            return PRIORITY_CONDITIONAL
+        return PRIORITY_ARCHIVE
+
+    if NUMERIC_TOP_LEVEL_RE.match(top_level):
+        if "증권의 발행" in top_level or "자금" in top_level:
+            return PRIORITY_CONDITIONAL
+        return PRIORITY_ARCHIVE
+
+    return PRIORITY_CONDITIONAL
+
+
 def _is_noise_text(text: str) -> bool:
     normalized = _normalize_space(text)
     if not normalized:
@@ -111,6 +187,7 @@ def profile_section(section: Section) -> SectionProfile:
     body_lines = [line.strip() for line in section.body.splitlines() if line.strip()]
     body_text = section.body.strip()
     section_type = infer_section_type(section)
+    section_priority = infer_section_priority(section)
     is_cover = section_type == "cover"
     is_noise = _is_noise_text(body_text)
 
@@ -122,6 +199,7 @@ def profile_section(section: Section) -> SectionProfile:
         body_line_count=len(body_lines),
         body_hash=_stable_text_hash(body_text),
         section_type=section_type,
+        section_priority=section_priority,
         is_cover=is_cover,
         is_noise=is_noise,
     )
@@ -231,6 +309,7 @@ def build_section_chunks(
                     heading=section.heading,
                     source_tag=section.source_tag,
                     section_type=profile.section_type,
+                    section_priority=profile.section_priority,
                     text=text,
                     retrieval_text=retrieval_text,
                     body_char_start=bucket_start,
@@ -238,7 +317,16 @@ def build_section_chunks(
                     char_count=len(text),
                     token_estimate=max(1, math.ceil(len(retrieval_text) / 4)),
                     is_retrieval_candidate=(
-                        not profile.is_cover and not profile.is_noise and len(text) >= 80
+                        profile.section_priority == PRIORITY_CORE
+                        and not profile.is_cover
+                        and not profile.is_noise
+                        and len(text) >= 80
+                    ),
+                    is_conditional_candidate=(
+                        profile.section_priority == PRIORITY_CONDITIONAL
+                        and not profile.is_cover
+                        and not profile.is_noise
+                        and len(text) >= 80
                     ),
                 )
             )
@@ -324,6 +412,7 @@ def build_qa_checks(
     )
 
     retrieval_candidates = [chunk for chunk in chunks if chunk.is_retrieval_candidate]
+    conditional_candidates = [chunk for chunk in chunks if chunk.is_conditional_candidate]
     checks.append(
         QaCheck(
             check_name="retrieval_chunks_present",
@@ -333,7 +422,8 @@ def build_qa_checks(
             metric_value=float(len(retrieval_candidates)),
             details=(
                 f"Generated {len(chunks)} chunks, "
-                f"{len(retrieval_candidates)} of which are retrieval candidates."
+                f"{len(retrieval_candidates)} core retrieval chunks and "
+                f"{len(conditional_candidates)} conditional retrieval chunks."
             ),
         )
     )
@@ -375,6 +465,32 @@ def build_qa_checks(
     )
 
     return checks
+
+
+def summarize_section_priority_counts(sections: list[Section]) -> dict[str, int]:
+    counts = {
+        PRIORITY_CORE: 0,
+        PRIORITY_CONDITIONAL: 0,
+        PRIORITY_ARCHIVE: 0,
+    }
+    for section in sections:
+        counts[profile_section(section).section_priority] += 1
+    return counts
+
+
+def summarize_chunk_priority_counts(chunks: list[SectionChunk]) -> dict[str, int]:
+    counts = {
+        PRIORITY_CORE: 0,
+        PRIORITY_CONDITIONAL: 0,
+        PRIORITY_ARCHIVE: 0,
+    }
+    for chunk in chunks:
+        counts[chunk.section_priority] += 1
+    return counts
+
+
+def filter_chunks_by_priority(chunks: list[SectionChunk], priority: str) -> list[SectionChunk]:
+    return [chunk for chunk in chunks if chunk.section_priority == priority]
 
 
 def summarize_qa_status(checks: list[QaCheck]) -> str:

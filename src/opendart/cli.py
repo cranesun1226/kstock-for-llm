@@ -44,6 +44,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"xbrl_zip: {result.raw_xbrl_path or '<not available>'}")
         print(f"sections_json: {result.sections_path} ({result.sections_count} sections)")
         print(f"chunks_jsonl: {result.chunks_path} ({result.chunks_count} chunks)")
+        print(f"core_chunks_jsonl: {result.core_chunks_path} ({result.core_chunks_count} chunks)")
+        print(
+            "conditional_chunks_jsonl: "
+            f"{result.conditional_chunks_path} ({result.conditional_chunks_count} chunks)"
+        )
         print(
             f"financial_facts_json: {result.financial_facts_path} "
             f"({result.financial_facts_count} facts)"

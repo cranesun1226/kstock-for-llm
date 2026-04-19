@@ -56,6 +56,8 @@ python3 -m opendart --help
 - `data/silver/005930/2025/annual-report_2025-12_20260310_002820/financial_facts.json`
 - `data/silver/005930/2025/annual-report_2025-12_20260310_002820/manifest.json`
 - `data/gold/005930/2025/annual-report_2025-12_20260310_002820/chunks.jsonl`
+- `data/gold/005930/2025/annual-report_2025-12_20260310_002820/core_chunks.jsonl`
+- `data/gold/005930/2025/annual-report_2025-12_20260310_002820/conditional_chunks.jsonl`
 - `data/gold/005930/2025/annual-report_2025-12_20260310_002820/qa_checks.json`
 
 `opendart.db` 에는 현재 아래 계층이 함께 적재됩니다.
@@ -63,6 +65,16 @@ python3 -m opendart --help
 - canonical: `issuers`, `filings`, `sections`, `financial_facts`, `filing_artifacts`
 - derived: `section_chunks`, `qa_checks`
 - operations: `sync_runs`
+
+`core_chunks.jsonl` 는 LLM 기본 공급용 chunk pool 이고,
+`conditional_chunks.jsonl` 는 감사/주주/지배구조/특수관계자 거래 등
+질문이 맞을 때만 추가로 여는 chunk pool 입니다.
+
+현재 chunk 우선순위는 아래처럼 구분됩니다.
+
+- `core`: `I. 회사의 개요`, `II. 사업의 내용`, `III. 재무에 관한 사항`, `IV. 이사의 경영진단 및 분석의견`, `XI. 그 밖에 투자자 보호를 위하여 필요한 사항`
+- `conditional`: `V. 회계감사인의 감사의견 등`, `VII. 주주에 관한 사항`, `X. 대주주 등과의 거래내용`, 일부 지배구조/직원/계열회사 요약 구간
+- `archive`: `XII. 상세표`, 표지, 대표이사 확인, 상세 임원 현황, 대규모 표/부속자료
 
 ## 현재 범위
 
