@@ -4,18 +4,21 @@ import io
 import re
 import zipfile
 from dataclasses import asdict, dataclass
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterable
-from xml.etree import ElementTree as ET
 
 
 HEADING_TAGS = {
-    "TITLE": 1,
-    "SUBTITLE": 2,
-    "SECTION": 2,
     "CHAPTER": 1,
-    "ARTICLE": 2,
     "HEAD": 2,
+    "ARTICLE": 2,
+    "SECTION": 2,
+    "SECTION-1": 1,
+    "SECTION-2": 2,
+    "SECTION-3": 3,
+    "SUBTITLE": 2,
+    "TITLE": 1,
 }
 
 ROMAN_RE = re.compile(r"^(?:[IVXLCM]+)\.\s+")
@@ -25,6 +28,11 @@ PAREN_RE = re.compile(r"^\(\d+\)\s+|^\([A-Za-z가-힣]\)\s+")
 LETTER_RE = re.compile(r"^[A-Za-z]\.\s+")
 MAJOR_HEADING_RE = re.compile(r"(?:사항|현황|내용|구조|의견|정책|개요|추이)$")
 WHITESPACE_RE = re.compile(r"\s+")
+ANGLE_FRAGMENT_RE = re.compile(r"<([^<>]+)>")
+VALID_TAG_FRAGMENT_RE = re.compile(
+    r"^/?[A-Za-z_][A-Za-z0-9_.:-]*"
+    r"(?:\s+[A-Za-z_:][-A-Za-z0-9_.:]*\s*=\s*(?:\"[^\"]*\"|'[^']*'))*\s*/?$"
+)
 
 
 @dataclass
@@ -37,6 +45,13 @@ class Section:
 
     def to_dict(self) -> dict[str, str | int]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class _TextNode:
+    tag: str
+    text: str
+    attrs: dict[str, str]
 
 
 def decode_xml_bytes(payload: bytes) -> str:
@@ -54,21 +69,79 @@ def _clean_text(value: str | None) -> str:
     return WHITESPACE_RE.sub(" ", value.replace("\u00a0", " ")).strip()
 
 
-def _iter_text_nodes(root: ET.Element) -> Iterable[tuple[str, str]]:
-    for element in root.iter():
-        tag = element.tag.split("}")[-1].upper()
-        direct_text = _clean_text(element.text)
-        if direct_text:
-            yield tag, direct_text
-        tail_text = _clean_text(element.tail)
-        if tail_text:
-            yield f"{tag}_TAIL", tail_text
+def _preprocess_markup_text(value: str) -> str:
+    text = value.replace("\ufeff", "")
+
+    def escape_suspicious_angle_fragment(match: re.Match[str]) -> str:
+        inner = match.group(1)
+        candidate = inner.strip()
+        if candidate.startswith(("!", "?")):
+            return match.group(0)
+        if VALID_TAG_FRAGMENT_RE.match(candidate):
+            return match.group(0)
+        return f"&lt;{inner}&gt;"
+
+    return ANGLE_FRAGMENT_RE.sub(escape_suspicious_angle_fragment, text)
 
 
-def infer_heading_level(tag: str, text: str) -> int | None:
-    normalized_tag = tag.replace("_TAIL", "")
-    if normalized_tag in HEADING_TAGS and len(text) <= 120:
-        return HEADING_TAGS[normalized_tag]
+class _DartMarkupParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._stack: list[tuple[str, dict[str, str]]] = []
+        self._body_depth = 0
+        self._seen_body = False
+        self.nodes: list[_TextNode] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        normalized_tag = tag.upper()
+        attr_map = {str(key).upper(): (value or "") for key, value in attrs}
+        self._stack.append((normalized_tag, attr_map))
+        if normalized_tag == "BODY":
+            self._body_depth += 1
+            self._seen_body = True
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+        self.handle_endtag(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        normalized_tag = tag.upper()
+        if normalized_tag == "BODY" and self._body_depth > 0:
+            self._body_depth -= 1
+
+        for index in range(len(self._stack) - 1, -1, -1):
+            if self._stack[index][0] == normalized_tag:
+                del self._stack[index:]
+                return
+
+    def handle_data(self, data: str) -> None:
+        if self._seen_body and self._body_depth == 0:
+            return
+
+        text = _clean_text(data)
+        if not text:
+            return
+
+        tag, attrs = self._current_context()
+        self.nodes.append(_TextNode(tag=tag, text=text, attrs=attrs))
+
+    def _current_context(self) -> tuple[str, dict[str, str]]:
+        for tag, attrs in reversed(self._stack):
+            if tag not in {"DOCUMENT", "BODY"}:
+                return tag, attrs
+        if self._stack:
+            return self._stack[-1]
+        return "DOCUMENT", {}
+
+
+def _iter_text_nodes(markup_text: str) -> Iterable[_TextNode]:
+    parser = _DartMarkupParser()
+    parser.feed(_preprocess_markup_text(markup_text))
+    parser.close()
+    return parser.nodes
+
+
+def infer_heading_level(tag: str, text: str, attrs: dict[str, str] | None = None) -> int | None:
     if len(text) > 120:
         return None
     if ROMAN_RE.match(text):
@@ -81,14 +154,18 @@ def infer_heading_level(tag: str, text: str) -> int | None:
         return 4
     if LETTER_RE.match(text):
         return 4
+    normalized_tag = tag.replace("_TAIL", "").upper()
+    if normalized_tag in HEADING_TAGS:
+        return HEADING_TAGS[normalized_tag]
+    if attrs and attrs.get("USERMARK", "").upper() == "B" and 2 <= len(text) <= 60:
+        return 3
     if 2 <= len(text) <= 40 and MAJOR_HEADING_RE.search(text):
         return 2
     return None
 
 
 def parse_sections_from_xml_text(xml_text: str) -> list[Section]:
-    root = ET.fromstring(xml_text)
-    lines = list(_iter_text_nodes(root))
+    lines = list(_iter_text_nodes(xml_text))
 
     sections: list[Section] = []
     stack: list[tuple[int, str]] = []
@@ -110,10 +187,12 @@ def parse_sections_from_xml_text(xml_text: str) -> list[Section]:
                 )
             )
 
-    for tag, text in lines:
+    for node in lines:
+        tag = node.tag
+        text = node.text
         if not text:
             continue
-        level = infer_heading_level(tag, text)
+        level = infer_heading_level(tag, text, node.attrs)
         if level is not None:
             flush()
             body_lines = []
@@ -133,7 +212,7 @@ def parse_sections_from_xml_text(xml_text: str) -> list[Section]:
     if sections:
         return sections
 
-    fallback_body = "\n".join(text for _tag, text in lines).strip()
+    fallback_body = "\n".join(node.text for node in lines).strip()
     if not fallback_body:
         return []
     return [

@@ -30,8 +30,8 @@ OPENDART_API_KEY=your_api_key_here
 선택 설정:
 
 ```bash
-KSTOCK_DATA_DIR=data
-KSTOCK_DB_PATH=data/app.db
+OPENDART_DATA_DIR=data
+OPENDART_DB_PATH=data/opendart.db
 ```
 
 ### 3. 삼성전자 2025 사업보고서 동기화
@@ -49,12 +49,20 @@ python3 -m opendart --help
 
 정상 실행 시 아래 결과가 생성됩니다.
 
-- `data/app.db`
-- `data/raw/005930/2025/<rcept_no>/document.zip`
-- `data/raw/005930/2025/<rcept_no>/xbrl.zip` 또는 미존재
-- `data/silver/005930/2025/<rcept_no>/sections.json`
-- `data/silver/005930/2025/<rcept_no>/financial_facts.json`
-- `data/silver/005930/2025/<rcept_no>/manifest.json`
+- `data/opendart.db`
+- `data/raw/005930/2025/annual-report_2025-12_20260310_002820/document.zip`
+- `data/raw/005930/2025/annual-report_2025-12_20260310_002820/xbrl.zip` 또는 미존재
+- `data/silver/005930/2025/annual-report_2025-12_20260310_002820/sections.json`
+- `data/silver/005930/2025/annual-report_2025-12_20260310_002820/financial_facts.json`
+- `data/silver/005930/2025/annual-report_2025-12_20260310_002820/manifest.json`
+- `data/gold/005930/2025/annual-report_2025-12_20260310_002820/chunks.jsonl`
+- `data/gold/005930/2025/annual-report_2025-12_20260310_002820/qa_checks.json`
+
+`opendart.db` 에는 현재 아래 계층이 함께 적재됩니다.
+
+- canonical: `issuers`, `filings`, `sections`, `financial_facts`, `filing_artifacts`
+- derived: `section_chunks`, `qa_checks`
+- operations: `sync_runs`
 
 ## 현재 범위
 

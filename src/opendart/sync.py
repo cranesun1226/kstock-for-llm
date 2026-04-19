@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -7,12 +8,25 @@ from pathlib import Path
 from typing import Any
 
 from .client import OpenDartClient, OpenDartNoDataError
+from .derived import (
+    build_qa_checks,
+    build_section_chunks,
+    summarize_qa_status,
+    write_chunks_jsonl,
+    write_qa_checks_json,
+)
 from .parsers import parse_sections_from_document_zip, write_sections_json
 from .settings import Settings
 from .storage import Database
 
 
 ANNUAL_REPORT_CODE = "11011"
+REPORT_PERIOD_RE = re.compile(r"\((\d{4})\.(\d{2})\)")
+REPORT_KIND_SLUGS = (
+    ("사업보고서", "annual-report"),
+    ("반기보고서", "half-year-report"),
+    ("분기보고서", "quarter-report"),
+)
 
 
 @dataclass(frozen=True)
@@ -27,12 +41,45 @@ class SyncResult:
     raw_xbrl_path: Path | None
     sections_path: Path
     financial_facts_path: Path
+    chunks_path: Path
+    qa_checks_path: Path
     sections_count: int
+    chunks_count: int
     financial_facts_count: int
+    qa_status: str
 
 
 def _normalize_report_name(value: str) -> str:
     return re.sub(r"\s+", " ", value or "").strip()
+
+
+def derive_report_kind_slug(report_nm: str) -> str:
+    normalized = _normalize_report_name(report_nm)
+    for needle, slug in REPORT_KIND_SLUGS:
+        if needle in normalized:
+            if normalized.startswith("[기재정정]") or normalized.startswith("[첨부정정]"):
+                return f"amended-{slug}"
+            return slug
+    return "filing"
+
+
+def build_filing_storage_slug(report_nm: str, rcept_no: str, rcept_dt: str) -> str:
+    period_match = REPORT_PERIOD_RE.search(report_nm)
+    fiscal_period = (
+        f"{period_match.group(1)}-{period_match.group(2)}"
+        if period_match is not None
+        else "unknown-period"
+    )
+    filing_date = rcept_dt if len(rcept_dt) == 8 and rcept_dt.isdigit() else "unknown-date"
+    receipt_suffix = rcept_no[-6:] if len(rcept_no) >= 6 else (rcept_no or "unknown")
+    return "_".join(
+        [
+            derive_report_kind_slug(report_nm),
+            fiscal_period,
+            filing_date,
+            receipt_suffix,
+        ]
+    )
 
 
 def select_best_annual_filing(
@@ -65,6 +112,26 @@ def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _file_artifact(
+    *,
+    rcept_no: str,
+    layer: str,
+    artifact_role: str,
+    artifact_format: str,
+    path: Path,
+) -> dict[str, Any]:
+    payload = path.read_bytes()
+    return {
+        "rcept_no": rcept_no,
+        "layer": layer,
+        "artifact_role": artifact_role,
+        "artifact_format": artifact_format,
+        "path": str(path),
+        "byte_size": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
 def sync_annual_report(
     *,
     settings: Settings,
@@ -74,6 +141,11 @@ def sync_annual_report(
 ) -> SyncResult:
     client = OpenDartClient(settings.api_key)
     database = Database(settings.database_path)
+    sync_run_id = database.begin_sync_run(
+        stock_code=stock_code,
+        corp_code=corp_code,
+        business_year=business_year,
+    )
 
     try:
         issuer = client.resolve_company(stock_code=stock_code, corp_code=corp_code)
@@ -92,8 +164,17 @@ def sync_annual_report(
 
         rcept_no = str(filing["rcept_no"])
         stock_code_value = issuer["stock_code"]
-        raw_base_dir = settings.raw_dir / stock_code_value / str(business_year) / rcept_no
-        silver_base_dir = settings.silver_dir / stock_code_value / str(business_year) / rcept_no
+        report_kind = derive_report_kind_slug(str(filing["report_nm"]))
+        filing_storage_slug = build_filing_storage_slug(
+            str(filing["report_nm"]),
+            rcept_no,
+            str(filing.get("rcept_dt", "")),
+        )
+        raw_base_dir = settings.raw_dir / stock_code_value / str(business_year) / filing_storage_slug
+        silver_base_dir = (
+            settings.silver_dir / stock_code_value / str(business_year) / filing_storage_slug
+        )
+        gold_base_dir = settings.gold_dir / stock_code_value / str(business_year) / filing_storage_slug
         raw_document_path = raw_base_dir / "document.zip"
         raw_xbrl_path = raw_base_dir / "xbrl.zip"
 
@@ -117,13 +198,24 @@ def sync_annual_report(
                 "corp_code": issuer["corp_code"],
                 "stock_code": stock_code_value,
                 "corp_name": issuer["corp_name"],
+                "business_year": business_year,
+                "fiscal_month": issuer["acc_mt"],
                 "report_nm": filing["report_nm"],
+                "report_kind": report_kind,
                 "reprt_code": ANNUAL_REPORT_CODE,
                 "rcept_dt": filing["rcept_dt"],
                 "flr_nm": filing.get("flr_nm"),
                 "is_final": 1,
+                "storage_key": filing_storage_slug,
                 "raw_document_path": str(raw_document_path),
                 "raw_xbrl_path": xbrl_path_for_db,
+                "silver_base_path": str(silver_base_dir),
+                "gold_base_path": str(gold_base_dir),
+                "manifest_path": None,
+                "sections_count": 0,
+                "chunks_count": 0,
+                "financial_facts_count": 0,
+                "qa_status": None,
             }
         )
 
@@ -131,9 +223,12 @@ def sync_annual_report(
         sections_path = silver_base_dir / "sections.json"
         write_sections_json(sections_path, sections)
         database.replace_sections(rcept_no, sections)
+        chunks = build_section_chunks(sections)
+        chunks_path = gold_base_dir / "chunks.jsonl"
+        write_chunks_jsonl(chunks_path, chunks)
+        database.replace_section_chunks(rcept_no, chunks)
 
         all_facts: list[dict[str, Any]] = []
-        facts_by_division: dict[str, list[dict[str, Any]]] = {}
         for fs_div in ("CFS", "OFS"):
             try:
                 facts = client.fetch_financial_statement_all(
@@ -141,7 +236,6 @@ def sync_annual_report(
                 )
             except OpenDartNoDataError:
                 facts = []
-            facts_by_division[fs_div] = facts
             if facts:
                 database.replace_financial_facts(
                     rcept_no=rcept_no,
@@ -157,6 +251,11 @@ def sync_annual_report(
 
         financial_facts_path = silver_base_dir / "financial_facts.json"
         _write_json(financial_facts_path, all_facts)
+        qa_checks = build_qa_checks(sections, all_facts, chunks)
+        qa_checks_path = gold_base_dir / "qa_checks.json"
+        write_qa_checks_json(qa_checks_path, qa_checks)
+        database.replace_qa_checks(rcept_no, qa_checks)
+        qa_status = summarize_qa_status(qa_checks)
 
         manifest_path = silver_base_dir / "manifest.json"
         _write_json(
@@ -168,13 +267,114 @@ def sync_annual_report(
                 "business_year": business_year,
                 "rcept_no": rcept_no,
                 "report_nm": filing["report_nm"],
+                "report_kind": report_kind,
+                "storage_key": filing_storage_slug,
+                "canonical_db_path": str(settings.database_path),
                 "raw_document_path": str(raw_document_path),
                 "raw_xbrl_path": str(raw_xbrl_path) if raw_xbrl_path else None,
                 "sections_path": str(sections_path),
                 "financial_facts_path": str(financial_facts_path),
+                "chunks_path": str(chunks_path),
+                "qa_checks_path": str(qa_checks_path),
                 "sections_count": len(sections),
+                "chunks_count": len(chunks),
                 "financial_facts_count": len(all_facts),
+                "qa_status": qa_status,
+                "qa_check_count": len(qa_checks),
             },
+        )
+        database.upsert_filing(
+            {
+                "rcept_no": rcept_no,
+                "corp_code": issuer["corp_code"],
+                "stock_code": stock_code_value,
+                "corp_name": issuer["corp_name"],
+                "business_year": business_year,
+                "fiscal_month": issuer["acc_mt"],
+                "report_nm": filing["report_nm"],
+                "report_kind": report_kind,
+                "reprt_code": ANNUAL_REPORT_CODE,
+                "rcept_dt": filing["rcept_dt"],
+                "flr_nm": filing.get("flr_nm"),
+                "is_final": 1,
+                "storage_key": filing_storage_slug,
+                "raw_document_path": str(raw_document_path),
+                "raw_xbrl_path": xbrl_path_for_db,
+                "silver_base_path": str(silver_base_dir),
+                "gold_base_path": str(gold_base_dir),
+                "manifest_path": str(manifest_path),
+                "sections_count": len(sections),
+                "chunks_count": len(chunks),
+                "financial_facts_count": len(all_facts),
+                "qa_status": qa_status,
+            }
+        )
+        artifacts = [
+            _file_artifact(
+                rcept_no=rcept_no,
+                layer="raw",
+                artifact_role="document_zip",
+                artifact_format="zip",
+                path=raw_document_path,
+            ),
+            _file_artifact(
+                rcept_no=rcept_no,
+                layer="silver",
+                artifact_role="sections_json",
+                artifact_format="json",
+                path=sections_path,
+            ),
+            _file_artifact(
+                rcept_no=rcept_no,
+                layer="silver",
+                artifact_role="financial_facts_json",
+                artifact_format="json",
+                path=financial_facts_path,
+            ),
+            _file_artifact(
+                rcept_no=rcept_no,
+                layer="silver",
+                artifact_role="manifest_json",
+                artifact_format="json",
+                path=manifest_path,
+            ),
+            _file_artifact(
+                rcept_no=rcept_no,
+                layer="gold",
+                artifact_role="chunks_jsonl",
+                artifact_format="jsonl",
+                path=chunks_path,
+            ),
+            _file_artifact(
+                rcept_no=rcept_no,
+                layer="gold",
+                artifact_role="qa_checks_json",
+                artifact_format="json",
+                path=qa_checks_path,
+            ),
+        ]
+        if raw_xbrl_path is not None:
+            artifacts.append(
+                _file_artifact(
+                    rcept_no=rcept_no,
+                    layer="raw",
+                    artifact_role="xbrl_zip",
+                    artifact_format="zip",
+                    path=raw_xbrl_path,
+                )
+            )
+        database.replace_filing_artifacts(rcept_no, artifacts)
+        database.finish_sync_run(
+            sync_run_id,
+            status="success",
+            stock_code=stock_code_value,
+            corp_code=issuer["corp_code"],
+            rcept_no=rcept_no,
+            report_nm=str(filing["report_nm"]),
+            message=(
+                f"sections={len(sections)}, chunks={len(chunks)}, "
+                f"financial_facts={len(all_facts)}, qa_status={qa_status}"
+            ),
         )
 
         return SyncResult(
@@ -188,8 +388,21 @@ def sync_annual_report(
             raw_xbrl_path=raw_xbrl_path,
             sections_path=sections_path,
             financial_facts_path=financial_facts_path,
+            chunks_path=chunks_path,
+            qa_checks_path=qa_checks_path,
             sections_count=len(sections),
+            chunks_count=len(chunks),
             financial_facts_count=len(all_facts),
+            qa_status=qa_status,
         )
+    except Exception as exc:
+        database.finish_sync_run(
+            sync_run_id,
+            status="failed",
+            stock_code=stock_code,
+            corp_code=corp_code,
+            message=str(exc),
+        )
+        raise
     finally:
         database.close()

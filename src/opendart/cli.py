@@ -43,10 +43,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"document_zip: {result.raw_document_path}")
         print(f"xbrl_zip: {result.raw_xbrl_path or '<not available>'}")
         print(f"sections_json: {result.sections_path} ({result.sections_count} sections)")
+        print(f"chunks_jsonl: {result.chunks_path} ({result.chunks_count} chunks)")
         print(
             f"financial_facts_json: {result.financial_facts_path} "
             f"({result.financial_facts_count} facts)"
         )
+        print(f"qa_checks_json: {result.qa_checks_path} (qa_status={result.qa_status})")
         return 0
 
     parser.error(f"Unsupported command: {args.command}")

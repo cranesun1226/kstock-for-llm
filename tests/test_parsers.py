@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from opendart.parsers import parse_sections_from_xml_text
-from opendart.sync import select_best_annual_filing
+from opendart.sync import build_filing_storage_slug, select_best_annual_filing
 
 
 class ParserTests(unittest.TestCase):
@@ -49,6 +49,33 @@ class ParserTests(unittest.TestCase):
         )
 
         self.assertEqual(selected["rcept_no"], "20260315000001")
+
+    def test_parse_sections_tolerates_dart_markup_quirks(self) -> None:
+        xml_text = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <DOCUMENT>
+          <BODY>
+            <TITLE>I. 사업의 내용</TITLE>
+            <P>당사는 업계 최고 수준의 R&D 역량을 보유하고 있습니다.</P>
+            <P>< TV 시장점유율 추이 ></P>
+          </BODY>
+        </DOCUMENT>
+        """
+
+        sections = parse_sections_from_xml_text(xml_text)
+
+        self.assertEqual(len(sections), 1)
+        self.assertIn("R&D 역량", sections[0].body)
+        self.assertIn("TV 시장점유율 추이", sections[0].body)
+
+    def test_build_filing_storage_slug_prefers_semantic_path(self) -> None:
+        slug = build_filing_storage_slug(
+            "사업보고서 (2025.12)",
+            "20260310002820",
+            "20260310",
+        )
+
+        self.assertEqual(slug, "annual-report_2025-12_20260310_002820")
 
 
 if __name__ == "__main__":

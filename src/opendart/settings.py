@@ -35,6 +35,7 @@ class Settings:
     data_dir: Path
     raw_dir: Path
     silver_dir: Path
+    gold_dir: Path
     database_path: Path
     api_key: str
 
@@ -49,11 +50,18 @@ def load_settings(project_root: Path | None = None) -> Settings:
             "OPENDART_API_KEY is not set. Add it to your shell environment or .env."
         )
 
-    data_dir = _resolve_path(root, os.environ.get("KSTOCK_DATA_DIR"), "data")
+    data_dir = _resolve_path(
+        root,
+        os.environ.get("OPENDART_DATA_DIR") or os.environ.get("KSTOCK_DATA_DIR"),
+        "data",
+    )
     raw_dir = data_dir / "raw"
     silver_dir = data_dir / "silver"
+    gold_dir = data_dir / "gold"
     database_path = _resolve_path(
-        root, os.environ.get("KSTOCK_DB_PATH"), str(data_dir / "app.db")
+        root,
+        os.environ.get("OPENDART_DB_PATH") or os.environ.get("KSTOCK_DB_PATH"),
+        str(data_dir / "opendart.db"),
     )
 
     return Settings(
@@ -61,6 +69,7 @@ def load_settings(project_root: Path | None = None) -> Settings:
         data_dir=data_dir,
         raw_dir=raw_dir,
         silver_dir=silver_dir,
+        gold_dir=gold_dir,
         database_path=database_path,
         api_key=api_key,
     )
