@@ -509,7 +509,7 @@ Repo:
 초기 추천 구조:
 
 ```text
-src/kstock/
+src/opendart/
   config/
     settings.py
 
