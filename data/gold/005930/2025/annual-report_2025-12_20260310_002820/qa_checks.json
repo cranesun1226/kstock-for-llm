@@ -1,0 +1,44 @@
+[
+  {
+    "check_name": "sections_present",
+    "status": "pass",
+    "metric_value": 883.0,
+    "details": "Parsed 883 sections from the filing body."
+  },
+  {
+    "check_name": "financial_facts_present",
+    "status": "pass",
+    "metric_value": 370.0,
+    "details": "Loaded 370 financial facts from OpenDART."
+  },
+  {
+    "check_name": "oversized_sections",
+    "status": "warn",
+    "metric_value": 16.0,
+    "details": "16 sections exceeded 4,000 characters; max section length=94531."
+  },
+  {
+    "check_name": "noise_section_ratio",
+    "status": "pass",
+    "metric_value": 0.0,
+    "details": "0 sections were flagged as noise-like (0.00% of all sections)."
+  },
+  {
+    "check_name": "retrieval_chunks_present",
+    "status": "pass",
+    "metric_value": 146.0,
+    "details": "Generated 1259 chunks, 146 core retrieval chunks and 97 conditional retrieval chunks."
+  },
+  {
+    "check_name": "core_metric_coverage",
+    "status": "pass",
+    "metric_value": 4.0,
+    "details": "Matched 4/4 core metric groups (assets, revenue, operating income, net income)."
+  },
+  {
+    "check_name": "cover_section_detected",
+    "status": "pass",
+    "metric_value": 1.0,
+    "details": "Detected a cover section at the start of the filing."
+  }
+]

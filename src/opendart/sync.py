@@ -121,6 +121,15 @@ def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _public_path(project_root: Path, path: Path | None) -> str | None:
+    if path is None:
+        return None
+    try:
+        return path.resolve().relative_to(project_root.resolve()).as_posix()
+    except (OSError, ValueError):
+        return str(path)
+
+
 def _file_artifact(
     *,
     rcept_no: str,
@@ -292,15 +301,17 @@ def sync_annual_report(
                 "report_nm": filing["report_nm"],
                 "report_kind": report_kind,
                 "storage_key": filing_storage_slug,
-                "canonical_db_path": str(settings.database_path),
-                "raw_document_path": str(raw_document_path),
-                "raw_xbrl_path": str(raw_xbrl_path) if raw_xbrl_path else None,
-                "sections_path": str(sections_path),
-                "financial_facts_path": str(financial_facts_path),
-                "chunks_path": str(chunks_path),
-                "core_chunks_path": str(core_chunks_path),
-                "conditional_chunks_path": str(conditional_chunks_path),
-                "qa_checks_path": str(qa_checks_path),
+                "canonical_db_path": _public_path(settings.project_root, settings.database_path),
+                "raw_document_path": _public_path(settings.project_root, raw_document_path),
+                "raw_xbrl_path": _public_path(settings.project_root, raw_xbrl_path),
+                "sections_path": _public_path(settings.project_root, sections_path),
+                "financial_facts_path": _public_path(settings.project_root, financial_facts_path),
+                "chunks_path": _public_path(settings.project_root, chunks_path),
+                "core_chunks_path": _public_path(settings.project_root, core_chunks_path),
+                "conditional_chunks_path": _public_path(
+                    settings.project_root, conditional_chunks_path
+                ),
+                "qa_checks_path": _public_path(settings.project_root, qa_checks_path),
                 "sections_count": len(sections),
                 "chunks_count": len(chunks),
                 "core_sections_count": section_priority_counts[PRIORITY_CORE],

@@ -2,4 +2,8 @@
 .env
 __pycache__/
 *.pyc
-data/
+
+# Keep curated data outputs publishable, but do not track oversized or duplicated
+# batch artifacts in regular Git. Use Git LFS or GitHub Releases if these are needed.
+data/gold/business_knowledge/*/business_sections.jsonl
+data/gold/business_knowledge/*/*.partial.jsonl

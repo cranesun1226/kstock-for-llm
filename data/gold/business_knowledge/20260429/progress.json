@@ -1,0 +1,30 @@
+{
+  "status": "completed",
+  "started_at": "2026-04-29T04:32:04.647280+00:00",
+  "updated_at": "2026-04-29T05:02:39.722485+00:00",
+  "processed_count": 2649,
+  "total_count": 2649,
+  "remaining_count": 0,
+  "selected_count": 2649,
+  "failure_count": 0,
+  "current": null,
+  "manifest_path": "data/gold/business_knowledge/20260429/manifest.json",
+  "markdown_paths": [
+    "data/gold/business_knowledge/20260429/business_sections_001.md",
+    "data/gold/business_knowledge/20260429/business_sections_002.md",
+    "data/gold/business_knowledge/20260429/business_sections_003.md",
+    "data/gold/business_knowledge/20260429/business_sections_004.md",
+    "data/gold/business_knowledge/20260429/business_sections_005.md",
+    "data/gold/business_knowledge/20260429/business_sections_006.md",
+    "data/gold/business_knowledge/20260429/business_sections_007.md",
+    "data/gold/business_knowledge/20260429/business_sections_008.md",
+    "data/gold/business_knowledge/20260429/business_sections_009.md",
+    "data/gold/business_knowledge/20260429/business_sections_010.md",
+    "data/gold/business_knowledge/20260429/business_sections_011.md",
+    "data/gold/business_knowledge/20260429/business_sections_012.md",
+    "data/gold/business_knowledge/20260429/business_sections_013.md",
+    "data/gold/business_knowledge/20260429/business_sections_014.md",
+    "data/gold/business_knowledge/20260429/business_sections_015.md",
+    "data/gold/business_knowledge/20260429/business_sections_016.md"
+  ]
+}

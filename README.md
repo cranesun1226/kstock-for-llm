@@ -236,8 +236,10 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 GitHub 공개 저장소로 운영할 때는 다음 원칙을 지킵니다.
 
 - `OPENDART_API_KEY`는 환경변수 또는 로컬 `.env`에만 보관합니다.
-- `.env`, `.venv`, `data/`는 Git에 올리지 않습니다.
-- OpenDART 원문 ZIP, SQLite DB, GPT 지식 shard는 재생성 가능한 산출물이므로 기본적으로 커밋하지 않습니다.
+- `.env`, `.venv`, Python cache는 Git에 올리지 않습니다.
+- `data/`를 공개할 때는 100MiB 초과 파일을 일반 Git에 넣지 않습니다. 현재 대용량 `business_sections.jsonl`과 중복 checkpoint `*.partial.jsonl`은 `.gitignore`로 제외합니다.
+- GPTs 지식 업로드용 공개 데이터는 `business_sections_001.md`, `business_sections_002.md`, ... 형태의 Markdown shard를 우선 사용합니다.
+- OpenDART 원문 ZIP, SQLite DB, JSON/Markdown 산출물은 공개 공시에서 재생성 가능한 데이터입니다. 다만 OpenDART/FSS의 이용 조건과 GitHub 대용량 파일 제한을 함께 확인합니다.
 - GitHub repository settings에서 Dependabot alerts, secret scanning, push protection을 켜는 것을 권장합니다.
 - `main` 브랜치에는 pull request와 테스트 통과 후 병합하는 운영 방식을 권장합니다.
 - 코드 라이선스는 MIT이지만, OpenDART에서 내려받은 공시 원문과 데이터의 이용 조건은 OpenDART/FSS 정책을 따릅니다.
@@ -260,6 +262,7 @@ GitHub 공개 저장소로 운영할 때는 다음 원칙을 지킵니다.
 ## 문서
 
 - 전략 문서: [docs/dart-business-report-rag-strategy.md](docs/dart-business-report-rag-strategy.md)
+- 공개 데이터 설명: [data/README.md](data/README.md)
 - OpenDART 개발가이드: [공시정보](https://opendart.fss.or.kr/guide/main.do?apiGrpCd=DS001), [정기보고서 재무정보](https://opendart.fss.or.kr/guide/main.do?apiGrpCd=DS003)
 - GitHub 공개 저장소 참고: [Best practices for repositories](https://docs.github.com/en/repositories/creating-and-managing-repositories/best-practices-for-repositories), [Licensing a repository](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository)
 

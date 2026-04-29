@@ -968,8 +968,8 @@ def write_completed_progress(
         "remaining_count": 0,
         "selected_count": selected_count,
         "failure_count": failure_count,
-        "manifest_path": str(manifest_path),
-        "markdown_paths": [str(path) for path in markdown_paths],
+        "manifest_path": public_path(manifest_path),
+        "markdown_paths": [public_path(path) for path in markdown_paths],
         "current": None,
     }
     write_json_atomic(path, payload)
@@ -992,6 +992,13 @@ def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     temp_path.replace(path)
 
 
+def public_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(Path.cwd().resolve()).as_posix()
+    except (OSError, ValueError):
+        return str(path)
+
+
 def file_summary(path: Path) -> dict[str, Any]:
     payload = path.read_bytes()
     try:
@@ -999,7 +1006,7 @@ def file_summary(path: Path) -> dict[str, Any]:
     except UnicodeDecodeError:
         char_count = None
     return {
-        "path": str(path),
+        "path": public_path(path),
         "byte_size": len(payload),
         "char_count": char_count,
         "token_estimate": math.ceil((char_count or 0) / 4),
