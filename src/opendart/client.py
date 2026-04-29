@@ -138,27 +138,59 @@ class OpenDartClient:
     def search_filings(
         self,
         *,
-        corp_code: str,
+        corp_code: str | None = None,
         bgn_de: str,
         end_de: str,
         pblntf_detail_ty: str,
         last_reprt_at: str = "Y",
+        corp_cls: str | None = None,
+        page_no: int = 1,
         page_count: int = 100,
     ) -> list[dict[str, Any]]:
-        dataset = self._request_json(
-            "list.json",
+        dataset = self.search_filings_page(
             corp_code=corp_code,
             bgn_de=bgn_de,
             end_de=end_de,
-            pblntf_ty="A",
             pblntf_detail_ty=pblntf_detail_ty,
             last_reprt_at=last_reprt_at,
-            sort="date",
-            sort_mth="desc",
-            page_no=1,
+            corp_cls=corp_cls,
+            page_no=page_no,
             page_count=page_count,
         )
         return list(dataset.get("list", []))
+
+    def search_filings_page(
+        self,
+        *,
+        corp_code: str | None = None,
+        bgn_de: str,
+        end_de: str,
+        pblntf_detail_ty: str,
+        last_reprt_at: str = "Y",
+        corp_cls: str | None = None,
+        page_no: int = 1,
+        page_count: int = 100,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "bgn_de": bgn_de,
+            "end_de": end_de,
+            "pblntf_ty": "A",
+            "pblntf_detail_ty": pblntf_detail_ty,
+            "last_reprt_at": last_reprt_at,
+            "sort": "date",
+            "sort_mth": "desc",
+            "page_no": page_no,
+            "page_count": page_count,
+        }
+        if corp_code:
+            params["corp_code"] = corp_code
+        if corp_cls:
+            params["corp_cls"] = corp_cls
+
+        return self._request_json(
+            "list.json",
+            **params,
+        )
 
     def download_document(self, rcept_no: str) -> bytes:
         return self._request_zip_bytes("document.xml", rcept_no=rcept_no)

@@ -78,7 +78,10 @@ python3 -m opendart --help
 
 ## 현재 범위
 
-이번 단계는 단일 회사·단일 연도의 vertical slice 검증입니다.
+현재 포함된 범위는 두 갈래입니다.
+
+- 단일 회사·단일 사업연도 사업보고서 전체 sync vertical slice
+- 코스피/코스닥 사업보고서 `II. 사업의 내용` 전용 GPT 지식 파일 생성
 
 - `KRX master sync`
 - `배치 스케줄링`
@@ -86,6 +89,53 @@ python3 -m opendart --help
 - `agent tool orchestration`
 
 는 아직 포함하지 않았습니다.
+
+## 전종목 `II. 사업의 내용` GPT 지식 파일 생성
+
+전종목 사업 설명만 GPTs 지식에 넣고 싶을 때는 별도 배치 명령을 사용합니다.
+기존 전체 사업보고서/XBRL/재무 fact sync 와 달리, 이 명령은 사업보고서 원문에서
+`II. 사업의 내용` 하위 섹션만 추출해 Markdown shard 로 저장합니다.
+
+```bash
+PYTHONPATH=src python3 -m opendart build-business-knowledge
+```
+
+기본값:
+
+- 시장: 코스피(`Y`) + 코스닥(`K`)
+- 검색기간: 실행일 기준 최근 455일
+- 보고서 선택: 종목별 최신 사업보고서 기간 우선
+- 후보 순서: `[기재정정]사업보고서` > 일반 `사업보고서` > `[첨부정정]사업보고서`
+- 출력: `data/gold/business_knowledge/YYYYMMDD/`
+- GPT 업로드용 파일: `business_sections_001.md`, `business_sections_002.md`, ...
+- 보조 파일: `business_sections.jsonl`, `failures.jsonl`, `manifest.json`
+- 진행/중간 저장 파일: `progress.json`, `inventory.json`, `business_sections.partial.jsonl`, `failures.partial.jsonl`
+
+실행 중에는 터미널에 inventory/page/download/ok/error 로그가 표시됩니다.
+완료 전에도 `progress.json` 에 처리 건수와 현재 상태가 기록되고,
+회사 하나가 끝날 때마다 partial JSONL 에 결과가 append 됩니다.
+
+예시:
+
+```bash
+PYTHONPATH=src python3 -m opendart build-business-knowledge \
+  --business-year 2025 \
+  --end-date 2026-04-29 \
+  --lookback-days 455 \
+  --checkpoint-every 1 \
+  --max-files 20 \
+  --max-chars-per-file 5000000
+```
+
+테스트용으로 일부 종목만 처리하려면 inventory 수집 후 앞 N개만 다운로드합니다.
+
+```bash
+PYTHONPATH=src python3 -m opendart build-business-knowledge --limit 10
+```
+
+GPTs 지식 업로드에는 `.jsonl`보다 `.md` 파일을 우선 사용하세요.
+Markdown은 파일 파서가 읽기 쉬운 단일 컬럼 텍스트에 가깝고, 각 회사 블록에
+종목코드·회사명·시장·접수번호·DART 원문 링크가 함께 들어갑니다.
 
 ## 문서
 
