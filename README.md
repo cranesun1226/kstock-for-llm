@@ -13,6 +13,7 @@ OpenDART 기반으로 한국 상장사의 사업보고서를 수집하고, LLM/R
 ## 목차
 
 - [주요 기능](#주요-기능)
+- [GPTs 활용 예시](#gpts-활용-예시)
 - [OpenDART 연결 구조](#opendart-연결-구조)
 - [Requirements](#requirements)
 - [Quickstart](#quickstart)
@@ -33,6 +34,7 @@ OpenDART 기반으로 한국 상장사의 사업보고서를 수집하고, LLM/R
 - 전체 재무제표 fact를 JSON/SQLite로 정규화
 - RAG용 `chunks.jsonl`, 기본 검색용 `core_chunks.jsonl`, 조건부 검색용 `conditional_chunks.jsonl` 생성
 - 코스피/코스닥 사업보고서의 `II. 사업의 내용`만 모아 GPTs 지식 업로드용 Markdown shard 생성
+- 생성된 Markdown shard와 투자 리서치 노하우를 결합한 GPTs 운영 예시 제공
 - 긴 배치 실행을 위한 `progress.json`, partial JSONL, 실패 로그 기록
 
 ```mermaid
@@ -43,6 +45,22 @@ flowchart LR
     C --> E[SQLite: issuers / filings / sections / financial_facts]
     D --> F[LLM / RAG / GPTs Knowledge]
 ```
+
+## GPTs 활용 예시
+
+이 프로젝트의 `data/gold/business_knowledge/20260429/business_sections_*.md` 파일을 지식으로 업로드하고, 제작자의 투자 리서치 관점과 종목 비교 노하우를 더해 만든 GPTs 예시입니다.
+
+- GPTs 링크: [한국 주식 별이 다섯개 ⭐⭐⭐⭐⭐](https://chatgpt.com/g/g-69f17f1d34d88191b37d7c1bb814a796-hangug-jusig-byeoli-daseosgae)
+- 기반 데이터: 코스피/코스닥 2025 사업보고서의 `II. 사업의 내용`
+- 지식 파일: `data/gold/business_knowledge/20260429/business_sections_001.md` ~ `business_sections_016.md`
+- 생성 규모: 2,649개 종목, 16개 Markdown shard, 약 6,780만 자의 사업 내용 텍스트
+- 사용 목적: 개별 종목의 사업 구조를 읽고, 경쟁 회사·대체 종목·이벤트 수혜 가능성을 함께 비교하는 투자 리서치 보조
+
+![한국 주식 별이 다섯개 GPTs 스크린샷](gpts-screenshot.png)
+
+이 GPTs는 “삼성전기가 많이 올랐을 때 대체 주식을 찾기”, “SK하이닉스 투자 매력을 사업보고서 기반으로 점검하기”, “미국-이란 전쟁 종료 같은 매크로 이벤트를 한국 종목 아이디어로 연결하기”처럼 질문을 종목·산업·경쟁 구도 중심으로 확장하는 흐름을 목표로 합니다.
+
+> GPTs 답변은 투자 판단 보조용입니다. 실제 투자 결정 전에는 DART 원문, 최신 공시, 가격·실적·수급 데이터를 함께 검증해야 합니다.
 
 ## OpenDART 연결 구조
 
